@@ -1,38 +1,48 @@
+// =====================================================
+// SISTEMA SENSOR DE ESTACIONAMENTO - COMPLETO
+// =====================================================
+
 // =============================
-// Variaveis globais
+// VARIAVEIS GLOBAIS
 // =============================
-// Sensor
+
+// ========= SENSOR ============
 unsigned long tempoSensor = 0;
 const unsigned long intervaloSensor = 100;  // Tempo em milessegundos
 float distancia = 0;                        // Variavel para amarzenar a conversão em centimetros(cm)
 
-// Buzzer
+// ========== BUZZER ============
 unsigned long tempoBuzzer = 0;  // Tempo que o buzzer fica ligado
 bool buzzerLigado = false;      // Condição para ligar o buzzer
 
+// ========= FILTRO ==============
+const int NUM_AMOSTRAS = 5;
+float leituras[NUM_AMOSTRAS];
+int indiceLeitura = 0;
+float distanciaFiltrada = 0;
 
-// Variavel para mostrar o estado atual do buzzer
-enum ModoAlerta {
-  DESLIGADO,     // Sirene inativa
-  BAIXO,         // Intensidade mínima
-  MODERADO,      // Intensidade intermediária
-  ELEVADO,       // Atenção maior
-  VIGILANTE,     // Estado de prontidão
-  CRITICO,       // Alerta forte
-  EMERGENCIA     // Máxima urgência
+// ============= ESTADO ============
+enum Modo {
+  DESLIGADO,     
+  LONGE,         
+  MEDIO,         
+  PERTO,         
+  MUITO_PERTO,   
+  CRITICO        
 };
 
-ModoAlerta modoAtual = DESLIGADO;
+Modo modoAtual = DESLIGADO;
 
 
 // =============================
-// Pinos utilizados
+// PINOS
 // =============================
-// Sensor
+
+// ========== SENSOR ===========
 #define TRIG_PIN D5  // Sensor
 #define ECHO_PIN D6  // Sensor
 
-// LEDs
+// ============ LEDs ===========
 #define LED0 D0  // LED verde
 #define LED1 D1  // LED verde
 #define LED2 D2  // LED verde
@@ -40,12 +50,77 @@ ModoAlerta modoAtual = DESLIGADO;
 #define LED4 D4  // LED vermelho
 #define LED5 D7  // LED vermelho
 
-// Buzzer
+// ============ BUZZER ===========
 #define pinBuzzer D8  // Buzzer
 
 
 // =============================
-// Função para acionar o buzzer
+// FILTRO - MÉDIA MÓVEL
+// =============================
+float filtrarDistancia(float novaLeitura) {
+  leituras[indiceLeitura] = novaLeitura;
+  indiceLeitura++;
+
+  if (indiceLeitura >= NUM_AMOSTRAS)
+    indiceLeitura = 0;
+
+  float soma = 0;
+  for (int i = 0; i < NUM_AMOSTRAS; i++)
+    soma += leituras[i];
+
+  return soma / NUM_AMOSTRAS;  
+}
+
+
+// =============================
+// DETERMINAR MODO COM HISTERESE
+// =============================
+void determinarModo() {
+  switch (modoAtual) {
+    
+    case DESLIGADO:
+      if (distanciaFiltrada < 75)
+      modoAtual = LONGE;
+    break;
+
+    case LONGE:
+      if (distanciaFiltrada > 85)
+        modoAtual = DESLIGADO;
+      else if (distanciaFiltrada < 55)
+        modoAtual = MEDIO;
+      break;
+    
+    case MEDIO:
+      if (distanciaFiltrada > 65)
+        modoAtual = LONGE;
+      else if (distanciaFiltrada < 55)
+        modoAtual = PERTO;
+      break;
+
+    case PERTO:
+      if (distanciaFiltrada > 45)
+        modoAtual = MEDIO;
+      else if (distanciaFiltrada < 20)
+        modoAtual = MUITO_PERTO;
+      break;
+
+    case MUITO_PERTO:
+      if (distanciaFiltrada > 30)
+        modoAtual = PERTO;
+      else if (distanciaFiltrada < 10)
+        modoAtual = CRITICO;
+      break;
+
+    case CRITICO:
+      if (distanciaFiltrada > 15)
+        modoAtual = MUITO_PERTO;
+      break;  
+  }
+}
+
+
+// =============================
+// ATUALIZAR BUZZER
 // =============================
 void atualizarBuzzer() {
   unsigned long agora = millis();
@@ -59,38 +134,28 @@ void atualizarBuzzer() {
       buzzerLigado = false;
       return;
 
-    case BAIXO:
+    case LONGE:
       tempoON = 100;
-      tempoOFF = 1000;
+      tempoOFF = 1200;
       break;
 
-    case MODERADO:
-      tempoON = 200;
+    case MEDIO:
+      tempoON = 100;
       tempoOFF = 700;
       break;
 
-    case ELEVADO:
-      tempoON = 300;
-      tempoOFF = 500;
+    case PERTO:
+      tempoON = 120;
+      tempoOFF = 400;
       break;
 
-    case VIGILANTE:
-      tempoON = 200;
+    case MUITO_PERTO:
+      tempoON = 150;
       tempoOFF = 200;
-      break;
-
-    case CRITICO:
-      tempoON = 100;
-      tempoOFF = 100;
-      break;
-
-    case EMERGENCIA:
-      tempoON = 100;
-      tempoOFF = 0;
       break;
   }
 
-  // Máquina de estados o buzzer
+  // === MÁQUINA DE ESTADO DO BUZZER ===
   if (buzzerLigado) {
     if (agora - tempoBuzzer >= tempoON) {
       digitalWrite(pinBuzzer, LOW);
@@ -108,37 +173,32 @@ void atualizarBuzzer() {
 
 
 // =============================
-// Função para medir a distância
+// MEDIR DISTÂNCIA
 // =============================
 void medirDistancia() {
-  // Iniciar sensor desligado
+  // === INICIAR SENSOR DESLIGADO ===
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
 
-  // Iniciar por 10us e desliga
+  // === INICIAR POR 10us E DESLIGA ===
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  // Aguardar resposta e converter para "cm"
+  // === AGURARDAR RESPOSTA E CONVERTER PARA 'cm ===
   long duracao = pulseIn(ECHO_PIN, HIGH, 30000);
 
   if (duracao == 0) return;
 
   distancia = duracao * 0.034 / 2;
-
-  // Imprimir no serial monitor
-  Serial.print("Distancia: ");
-  Serial.print(distancia);
-  Serial.println(" cm");
 }
 
 
 // =============================
-// Função que atualiza os LEDs
+// ATUALIZAR LEDs
 // =============================
 void atualizarLEDs() {
-  // Apaga todos os LEDs no início (estado limpo)
+  // === APAGA TODOS OS LEDs NO INÍCIO (ESTADO LIMPO) ===
   digitalWrite(LED0, LOW);
   digitalWrite(LED1, LOW);
   digitalWrite(LED2, LOW);
@@ -146,55 +206,39 @@ void atualizarLEDs() {
   digitalWrite(LED4, LOW);
   digitalWrite(LED5, LOW);
 
-  // Verificação da distância
-  if (distancia > 31) {
-    modoAtual = DESLIGADO;
-
-  } else if (distancia > 30) {
+  // === VERIFICAÇÃO DA DISTÂNCIA ===
+  if (modoAtual == LONGE) {
     digitalWrite(LED0, HIGH);
-    modoAtual = BAIXO;
 
-  } else if (distancia > 25) {
+  } else if (modoAtual == MEDIO) {
     digitalWrite(LED0, HIGH);
     digitalWrite(LED1, HIGH);
-    modoAtual = MODERADO;
 
-  } else if (distancia > 20) {
+  } else if (modoAtual == PERTO) {
     digitalWrite(LED0, HIGH);
     digitalWrite(LED1, HIGH);
     digitalWrite(LED2, HIGH);
-    modoAtual = ELEVADO;
-
-  } else if (distancia > 15) {
+    
+  } else if (modoAtual == MUITO_PERTO) {
     digitalWrite(LED0, HIGH);
     digitalWrite(LED1, HIGH);
     digitalWrite(LED2, HIGH);
     digitalWrite(LED3, HIGH);
-    modoAtual = VIGILANTE;
-
-  } else if (distancia > 10) {
-    digitalWrite(LED0, HIGH);
-    digitalWrite(LED1, HIGH);
-    digitalWrite(LED2, HIGH);
-    digitalWrite(LED3, HIGH);
-    digitalWrite(LED4, HIGH);
-    modoAtual = CRITICO;
-
-  } else {
+    
+  } else if (modoAtual == CRITICO) {
     digitalWrite(LED0, HIGH);
     digitalWrite(LED1, HIGH);
     digitalWrite(LED2, HIGH);
     digitalWrite(LED3, HIGH);
     digitalWrite(LED4, HIGH);
     digitalWrite(LED5, HIGH);
-    modoAtual = EMERGENCIA;
-
-  }
+    
+  } 
 }
 
 
 // =============================
-// Setup
+// SETUP
 // =============================
 void setup() {
   pinMode(TRIG_PIN, OUTPUT);  // Sensor
@@ -214,20 +258,28 @@ void setup() {
 
 
 // =============================
-// Loop
+// LOOP
 // =============================
 void loop() {
   unsigned long agora = millis();
 
-  // === TAREFA 1: SENSOR ===
+  // 1. ATUALIZA SENSOR A CADA 100ms
   if (agora - tempoSensor >= intervaloSensor) {
     tempoSensor = agora;
     medirDistancia();
+
+    // APLICA FILTRO
+    distanciaFiltrada = filtrarDistancia(distancia);
+
+    // ATUALIZA MODO
+    determinarModo();
+
+    // DEBUG
+    Serial.print("Distancia filtrada: ");
+    Serial.println(distanciaFiltrada);
   }
 
-  // === TAREFA 2: LEDs ===
+  // 2. ATUALIZA SAÍDAS CONTINUAMENTE  
   atualizarLEDs();
-
-  // === TAREFA : BUZZER ===
   atualizarBuzzer();
 }
